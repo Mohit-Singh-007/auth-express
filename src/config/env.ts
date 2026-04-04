@@ -2,7 +2,7 @@ import z from "zod";
 
 const envSchema = z.object({
     NODE_ENV: z.enum(["development","production","test"]).default("development"),
-    PORT: z.number().default(5000),
+    PORT: z.coerce.number().default(5000),
 
     DATABASE_URL: z.string().min(1),
 
@@ -13,13 +13,14 @@ const envSchema = z.object({
     // JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
     // JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
-    // CLIENT_URL: z.string().url(),
+    CLIENT_URL: z.string().url(),
 });
 
 const parsedEnvSchema = envSchema.safeParse(process.env);
 
 if(!parsedEnvSchema.success){
     console.error("Invalid env variables");
+    console.error(JSON.stringify(parsedEnvSchema.error.flatten().fieldErrors, null, 2));
     process.exit(1);
 }
 
