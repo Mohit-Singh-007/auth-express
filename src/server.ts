@@ -5,10 +5,10 @@ import cors from "cors";
 import { env } from "./config/env";
 import cookieParser from "cookie-parser";
 import authRouter from "./routes/auth.routes";
-import { errorHandler } from "./middlewares/error.middleware";
+import { errorHandler } from "./middlewares/globalError.middleware";
 import { prisma } from "./config/prisma";
 import { verifyToken } from "./middlewares/verifyToken.middleware";
-import { requireRole } from "./middlewares/requireRole";
+import { requireRole } from "./middlewares/requireRole.middleware";
 
 
 

@@ -312,7 +312,7 @@ export const forgotPassword = async (email: string) =>{
     if(!user) return;
 
     // delete token for user [if any]
-    await prisma.refreshToken.deleteMany({
+    await prisma.emailToken.deleteMany({
         where:{
             userId: user.id,
             type: EmailTokenType.PASSWORD_RESET
