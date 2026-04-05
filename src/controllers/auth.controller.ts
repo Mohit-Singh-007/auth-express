@@ -73,7 +73,9 @@ export const logoutController = asyncHandler(async (req: Request, res: Response)
     }
 
     clearRefreshTokenCookie(res);
-})
+    res.json({ message: 'Logged out successfully' }); 
+});
+
 
 
 export const forgotPasswordController = asyncHandler(async (req: Request, res: Response) =>{

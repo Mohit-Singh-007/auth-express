@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs"
 import crypto from 'crypto';
 import { ApiError } from "../utils/ApiError";
 import { JwtPayload, signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
+import { redis } from "../config/redis";
 
 export const registerUser = async(data: RegisterInput) =>{
     const{name,email,password} = data;
@@ -114,38 +115,25 @@ export const loginUser = async(
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7day
 
 
-//         await Promise.all([
-//   redis.setex(
-//     `refresh:${user.id}:${refreshTokenId}`,
-//     7 * 24 * 60 * 60,
-//     refreshToken
-//   ),
-//   prisma.refreshToken.create({
-//     data: {
-//       id: refreshTokenId,
-//       token: refreshToken,
-//       userId: user.id,
-//       ipAddress: meta.ip,
-//       userAgent: meta.userAgent,
-//       deviceName: parseDeviceName(meta.userAgent),
-//       expiresAt,
-//     },
-//   }),
-// ]);
-        await 
-            prisma.refreshToken.create({
-                data:{
-                    id: refreshTokenId,
-                    token: refreshToken,
-                    userId: user.id,
-                    ipAddress: meta.ip,
-                    userAgent: meta.userAgent,
-                    deviceName: parseDeviceName(meta.userAgent),
-                    expiresAt
-                }
-            })
+        await Promise.all([
+         redis.setex(
+            `refresh:${user.id}:${refreshTokenId}`,
+            7 * 24 * 60 * 60,
+            refreshToken
+        ),
+        prisma.refreshToken.create({
+            data: {
+            id: refreshTokenId,
+            token: refreshToken,
+            userId: user.id,
+            ipAddress: meta.ip,
+            userAgent: meta.userAgent,
+            deviceName: parseDeviceName(meta.userAgent),
+            expiresAt,
+            },
+        }),
+        ]);
       
-
         return {
             accessToken,
             refreshToken,
@@ -244,24 +232,40 @@ export const refreshToken = async(incomingToken: string) =>{
         throw new ApiError(401,"Invalid refresh token");
     }
 
-    // 2. check if token in DB [not revoked yet]
+    // 1. check redis first -> if not then DB
+    const redisKey = await redis.keys(`refresh:${payload.userId}:*`)
+    let found = false;
+    for(const key of redisKey){
+        const val = await redis.get(key);
+            if(val === incomingToken){
+                found=true;
+                await redis.del(key); // delete old token from redis
+                break;
+            }
+    }
+    
+    // 2. also check if token in DB [not revoked yet]
     const storedToken = await prisma.refreshToken.findUnique({
         where:{token: incomingToken}
     })
 
-    if(!storedToken){
+    if(!storedToken && !found){
         // revoke all -> possible reuse attack
-        await prisma.refreshToken.deleteMany({
+        await Promise.all([
+ await prisma.refreshToken.deleteMany({
             where:{
                 userId: payload.userId
             }
-        })
+        }),
+        redis.del(...(await redis.keys(`refresh:${payload.userId}:*`)))
+        ])
+       
          throw new ApiError(401, 'Refresh token reuse detected');
     }
 
 
     // 3. check expiry of token
-    if(storedToken.expiresAt < new Date()){
+    if(storedToken && storedToken.expiresAt < new Date()){
         await prisma.refreshToken.delete({ where: { id: storedToken.id } });
         throw new ApiError(401, 'Refresh token expired');
     }
@@ -279,25 +283,36 @@ export const refreshToken = async(incomingToken: string) =>{
 
 
   // 5. delete old refresh token (rotation — one time use)
-  await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+  if(storedToken) await prisma.refreshToken.delete({ where: { id: storedToken.id } });
 
   // 6. sign new tokens
   const newPayload = { userId: user.id, email: user.email, role: user.role };
   const newAccessToken = signAccessToken(newPayload);
   const newRefreshToken = signRefreshToken(newPayload);
+  const newRefreshTokenId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   // 7. save new refresh token to DB
-  await prisma.refreshToken.create({
-    data: {
-      token: newRefreshToken,
-      userId: user.id,
-      ipAddress: storedToken.ipAddress,
-      userAgent: storedToken.userAgent,
-      deviceName: storedToken.deviceName,
-      lastUsedAt: new Date(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    },
-  });
+  await Promise.all([
+    redis.setex(
+      `refresh:${user.id}:${newRefreshToken}`,
+      7 * 24 * 60 * 60,
+      newRefreshToken
+    ),
+    prisma.refreshToken.create({
+      data: {
+        id: newRefreshTokenId,
+        token: newRefreshToken,
+        userId: user.id,
+        ipAddress: storedToken?.ipAddress,
+        userAgent: storedToken?.userAgent,
+        deviceName: storedToken?.deviceName,
+        lastUsedAt: new Date(),
+        expiresAt
+      },
+    }),
+  ]);
+
 
   return { newAccessToken, newRefreshToken };
 };
@@ -381,7 +396,14 @@ export const resetPassword = async (rawToken: string, newPassword: string) =>{
 
 
 export const logoutUser = async (refreshToken: string) => {
-  // delete from DB — token is now invalid
+
+  const payload = verifyRefreshToken(refreshToken);
+
+  // del from redis
+  const keys = await redis.keys(`refresh:${payload.userId}:*`)
+  if(keys.length > 0) await redis.del(...keys);
+
+  // delete from DB as well — token is now invalid
   await prisma.refreshToken.deleteMany({
     where: { token: refreshToken },
   });

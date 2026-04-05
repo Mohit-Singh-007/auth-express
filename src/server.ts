@@ -9,6 +9,7 @@ import { errorHandler } from "./middlewares/globalError.middleware";
 import { prisma } from "./config/prisma";
 import { verifyToken } from "./middlewares/verifyToken.middleware";
 import { requireRole } from "./middlewares/requireRole.middleware";
+import { redis } from "./config/redis";
 
 
 
@@ -43,7 +44,7 @@ app.use(errorHandler);
 
 
 async function main() {
-//   await redis.connect();
+  await redis.connect();
   await prisma.$connect();
 
   app.listen(env.PORT, () => {
