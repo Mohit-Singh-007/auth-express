@@ -52,6 +52,8 @@ export const registerUser = async(data: RegisterInput) =>{
     }
 }
 
+
+
 export const loginUser = async(
     data: LoginInput,
     meta: {ip?: string , userAgent?: string}) =>{
@@ -186,6 +188,8 @@ export const verifyEmail = async(rawToken: string) =>{
 
     return {message: "Email verified successfully..."}
 }
+
+
 
 export const resendVerificationEmail = async (email: string) => {
   const user = await prisma.user.findUnique({ where: { email } });
@@ -352,6 +356,8 @@ export const forgotPassword = async (email: string) =>{
     console.log(`RESET token for email ${email}: ${rawToken}`)
 }
 
+
+
 export const resetPassword = async (rawToken: string, newPassword: string) =>{
  // hash incoming token to compare with DB one
  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
@@ -393,6 +399,7 @@ export const resetPassword = async (rawToken: string, newPassword: string) =>{
    return { message: 'Password reset successful. Please login with your new password.' };
 
 }
+
 
 
 export const logoutUser = async (refreshToken: string) => {

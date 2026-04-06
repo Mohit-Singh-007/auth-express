@@ -10,15 +10,25 @@ import { prisma } from "./config/prisma";
 import { verifyToken } from "./middlewares/verifyToken.middleware";
 import { requireRole } from "./middlewares/requireRole.middleware";
 import { redis } from "./config/redis";
+import { generalLimiter } from "./middlewares/RateLimiter.middleware";
 
 
 
 const app = express();
 app.use(express.json());
-app.use(helmet());
-app.use(cors({origin: "*" , credentials: true}))
+app.use(helmet({
+  contentSecurityPolicy: true,
+  crossOriginEmbedderPolicy: true,
+  hidePoweredBy: true,       // removes X-Powered-By: Express header
+  hsts: true,                // forces HTTPS
+  noSniff: true,             // prevents MIME sniffing
+  xssFilter: true,           // basic XSS protection header
+}));
+
+app.use(cors({origin: env.CLIENT_URL , credentials: true}))
 app.use(cookieParser());
 
+app.use(generalLimiter) // general rate limiting
 
 app.use("/api/auth", authRouter);
 
