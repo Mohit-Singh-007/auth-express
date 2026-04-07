@@ -24,7 +24,7 @@ export const passwordResetLimiter = rateLimit({
 
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: {
     message: 'Too many requests, please try again later',
   },

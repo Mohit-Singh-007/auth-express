@@ -12,7 +12,8 @@ import { verifyToken } from "./middlewares/verify-token.middleware";
 import { requireRole } from "./middlewares/require-role.middleware";
 import { redis } from "./config/redis";
 import { generalLimiter } from "./middlewares/rate-limiter.middleware";
-
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 
 
 const app = express();
@@ -30,6 +31,17 @@ app.use(cors({origin: env.CLIENT_URL , credentials: true}))
 app.use(cookieParser());
 
 app.use(generalLimiter) // general rate limiting
+
+
+
+
+// swagger docs — disable in production if needed
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'Auth API Docs',
+  swaggerOptions: {
+    persistAuthorization: true, // ← keeps Bearer token between page refreshes
+  },
+}));
 
 app.use("/api/auth", authRouter);
 
