@@ -20,31 +20,60 @@ export const registerUser = async(data: RegisterInput) =>{
 
     if(existing) throw new ApiError(409,"Email already in use...");
 
-    // 2. hash password
+    // // 2. hash password
+    // const passwordHash = await bcrypt.hash(password,12);
+
+    // // 3. create user
+    // const user = await prisma.user.create({
+    //     data: {
+    //         name,
+    //         email,
+    //         passwordHash
+    //     }
+    // })
+
+    // // 4. email verification token generate kr and hash using crypto
+    // const rawToken = crypto.randomBytes(32).toString('hex');
+    // const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    // // 5. save token in DB
+    // await prisma.emailToken.create({
+    //     data:{
+    //         userId: user.id,
+    //         token: tokenHash,
+    //         type: EmailTokenType.EMAIL_VERIFICATION,
+    //         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hrs from now
+    //     }
+    // })
+
     const passwordHash = await bcrypt.hash(password,12);
-
-    // 3. create user
-    const user = await prisma.user.create({
-        data: {
-            name,
-            email,
-            passwordHash
-        }
-    })
-
-    // 4. email verification token generate kr and hash using crypto
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
 
-    // 5. save token in DB
-    await prisma.emailToken.create({
-        data:{
-            userId: user.id,
+    // move to transactions user + email verify token 
+    const user = await prisma.$transaction(async (tx) =>{
+
+        const newUser = await tx.user.create({
+            data:{
+                name,
+                email,
+                passwordHash
+            }
+        });
+
+        await tx.emailToken.create({
+                 data:{
+            userId: newUser.id,
             token: tokenHash,
             type: EmailTokenType.EMAIL_VERIFICATION,
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hrs from now
-        }
-    })
+        }   
+        })
+
+        return newUser;
+    });
+
+    
 
     const { subject, html } = verificationEmailTemplate(name, rawToken);
     await sendEmail({ to: email, subject, html });
@@ -205,19 +234,35 @@ export const verifyEmail = async(rawToken: string) =>{
 
 
     // 4. mark user verified and delete used token [tokens are one time use only]
-    await Promise.all([
-        prisma.user.update({
+    // await Promise.all([
+    //     prisma.user.update({
+    //         where: {
+    //             id: record.userId
+    //         },
+    //         data:{
+    //             isVerified: true
+    //         }
+    //     }),
+    //     prisma.emailToken.delete({where: {
+    //         id: record.id
+    //     }})
+    // ])
+
+    // atomic — both must succeed together
+    await prisma.$transaction(async (tx)=>{
+        await tx.user.update({
             where: {
                 id: record.userId
             },
             data:{
                 isVerified: true
             }
-        }),
-        prisma.emailToken.delete({where: {
+        });
+
+        await tx.emailToken.delete({where: {
             id: record.id
         }})
-    ])
+    })
 
     return {message: "Email verified successfully..."}
 }
@@ -261,85 +306,61 @@ await sendEmail({ to: email, subject, html });
 
 
 
-export const refreshToken = async(incomingToken: string) =>{
+export const refreshToken = async (incomingToken: string) => {
+  let payload: JwtPayload;
+  try {
+    payload = verifyRefreshToken(incomingToken);
+  } catch {
+    throw new ApiError(401, 'Invalid refresh token');
+  }
 
-    // 1. verify refresh token signature [payload]
-
-    let payload: JwtPayload;
-    try {
-        payload = verifyRefreshToken(incomingToken);
-    } catch  {
-        throw new ApiError(401,"Invalid refresh token");
+  // check Redis first
+  const redisKeys = await redis.keys(`refresh:${payload.userId}:*`);
+  let foundInRedis = false;
+  for (const key of redisKeys) {
+    const val = await redis.get(key);
+    if (val === incomingToken) {
+      foundInRedis = true;
+      await redis.del(key);
+      break;
     }
+  }
 
-    // 1. check redis first -> if not then DB
-    const redisKey = await redis.keys(`refresh:${payload.userId}:*`)
-    let found = false;
-    for(const key of redisKey){
-        const val = await redis.get(key);
-            if(val === incomingToken){
-                found=true;
-                await redis.del(key); // delete old token from redis
-                break;
-            }
-    }
-    
-    // 2. also check if token in DB [not revoked yet]
-    const storedToken = await prisma.refreshToken.findUnique({
-        where:{token: incomingToken}
-    })
+  // check DB
+  const storedToken = await prisma.refreshToken.findUnique({
+    where: { token: incomingToken },
+  });
 
-    if(!storedToken && !found){
-        // revoke all -> possible reuse attack
-        await Promise.all([
- await prisma.refreshToken.deleteMany({
-            where:{
-                userId: payload.userId
-            }
-        }),
-        redis.del(...(await redis.keys(`refresh:${payload.userId}:*`)))
-        ])
-       
-         throw new ApiError(401, 'Refresh token reuse detected');
-    }
+  if (!storedToken && !foundInRedis) {
+    // reuse attack — wipe everything
+    const keys = await redis.keys(`refresh:${payload.userId}:*`);
+    if (keys.length > 0) await redis.del(...keys);
+    await prisma.refreshToken.deleteMany({ where: { userId: payload.userId } });
+    throw new ApiError(401, 'Refresh token reuse detected');
+  }
 
+  if (storedToken && storedToken.expiresAt < new Date()) {
+    await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    throw new ApiError(401, 'Refresh token expired');
+  }
 
-    // 3. check expiry of token
-    if(storedToken && storedToken.expiresAt < new Date()){
-        await prisma.refreshToken.delete({ where: { id: storedToken.id } });
-        throw new ApiError(401, 'Refresh token expired');
-    }
-
-
-    // 4. get fresh data from DB
-    const user = await prisma.user.findUnique({
-        where:{
-            id: payload.userId
-        }
-    })
-    if (!user || !user.isVerified) {
+  const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+  if (!user || !user.isVerified) {
     throw new ApiError(401, 'User not found or not verified');
-     }
+  }
 
-
-  // 5. delete old refresh token (rotation — one time use)
-  if(storedToken) await prisma.refreshToken.delete({ where: { id: storedToken.id } });
-
-  // 6. sign new tokens
   const newPayload = { userId: user.id, email: user.email, role: user.role };
   const newAccessToken = signAccessToken(newPayload);
   const newRefreshToken = signRefreshToken(newPayload);
   const newRefreshTokenId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-  // 7. save new refresh token to DB
-  await Promise.all([
-    redis.setex(
-      `refresh:${user.id}:${newRefreshToken}`,
-      7 * 24 * 60 * 60,
-      newRefreshToken
-    ),
-    prisma.refreshToken.create({
+  // atomic — delete old + create new together
+  await prisma.$transaction(async (tx) => {
+    if (storedToken) {
+      await tx.refreshToken.delete({ where: { id: storedToken.id } });
+    }
+    await tx.refreshToken.create({
       data: {
         id: newRefreshTokenId,
         token: newRefreshToken,
@@ -348,11 +369,17 @@ export const refreshToken = async(incomingToken: string) =>{
         userAgent: storedToken?.userAgent,
         deviceName: storedToken?.deviceName,
         lastUsedAt: new Date(),
-        expiresAt
+        expiresAt,
       },
-    }),
-  ]);
+    });
+  });
 
+  // Redis OUTSIDE transaction
+  await redis.setex(
+    `refresh:${user.id}:${newRefreshTokenId}`, // ← UUID as key
+    7 * 24 * 60 * 60,
+    newRefreshToken
+  );
 
   return { newAccessToken, newRefreshToken };
 };
@@ -422,18 +449,33 @@ export const resetPassword = async (rawToken: string, newPassword: string) =>{
   const passwordHash = await bcrypt.hash(newPassword,12);
 
   // update pass + delete token + revoke all sessions
-  await Promise.all([
-    prisma.user.update({
-        where:{id: record.user.id},
-        data:{
-            passwordHash,
-            failedLoginAttempts:0,
-            lockedUntil: null
-        }
-    }),
-    prisma.emailToken.delete({where:{id: record.id}}),
-    prisma.refreshToken.deleteMany({where:{userId: record.userId}})
-  ])
+//   await Promise.all([
+//     prisma.user.update({
+//         where:{id: record.user.id},
+//         data:{
+//             passwordHash,
+//             failedLoginAttempts:0,
+//             lockedUntil: null
+//         }
+//     }),
+//     prisma.emailToken.delete({where:{id: record.id}}),
+//     prisma.refreshToken.deleteMany({where:{userId: record.userId}})
+//   ])
+// atomic — all three must succeed together
+await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: record.userId },
+      data: {
+        passwordHash,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    await tx.emailToken.delete({ where: { id: record.id } });
+
+    await tx.refreshToken.deleteMany({ where: { userId: record.userId } });
+  });
 
    return { message: 'Password reset successful. Please login with your new password.' };
 
