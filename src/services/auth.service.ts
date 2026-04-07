@@ -9,6 +9,8 @@ import { JwtPayload, signAccessToken, signRefreshToken, verifyRefreshToken } fro
 import { redis } from "../config/redis";
 import jwt from "jsonwebtoken"
 import { env } from "../config/env";
+import { passwordResetEmailTemplate, verificationEmailTemplate } from "../utils/emailTemplate";
+import { sendEmail } from "../utils/sendEmail";
 
 export const registerUser = async(data: RegisterInput) =>{
     const{name,email,password} = data;
@@ -44,6 +46,8 @@ export const registerUser = async(data: RegisterInput) =>{
         }
     })
 
+    const { subject, html } = verificationEmailTemplate(name, rawToken);
+    await sendEmail({ to: email, subject, html });
     // 6. send email with rawToken [later]
     console.log(`✅ Verification token for ${data.email}: ${rawToken}`);
 
@@ -247,6 +251,9 @@ export const resendVerificationEmail = async (email: string) => {
     },
   });
 
+  const { subject, html } = verificationEmailTemplate(user.name, rawToken);
+await sendEmail({ to: email, subject, html });
+
   // TODO: send email with rawToken (Step 8 — mailer)
   console.log(`Verification token for ${email}: ${rawToken}`);
 };
@@ -380,6 +387,9 @@ export const forgotPassword = async (email: string) =>{
         expiresAt: new Date(Date.now() + 15*60*1000)
        }
     })
+
+    const { subject, html } = passwordResetEmailTemplate(user.name, rawToken);
+await sendEmail({ to: email, subject, html });
 
     // TODO - real email here
     console.log(`RESET token for email ${email}: ${rawToken}`)

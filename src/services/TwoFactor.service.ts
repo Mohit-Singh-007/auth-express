@@ -1,9 +1,6 @@
-import  authenticator  from 'otplib';
-import QRCode from 'qrcode';
+
 import { prisma } from '../config/prisma';
 import { ApiError } from '../utils/ApiError';
-import { env } from '../config/env';
-import { tr } from 'zod/v4/locales';
 import { generateQRCode, generateTOTPSecret, verifyTOTPCode } from '../utils/TOTP';
 import { generateBackupCodes, hashBackupCodes, verifyBackupCode } from '../utils/backupCodes';
 

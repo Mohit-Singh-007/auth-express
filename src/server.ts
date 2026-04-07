@@ -1,4 +1,5 @@
 import "dotenv/config";
+import './config/mailer';
 import express, { Request, Response } from "express"
 import helmet from "helmet";
 import cors from "cors";

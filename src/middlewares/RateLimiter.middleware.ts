@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 // login , register , forgot-password
 export const authLimiter = rateLimit({
     windowMs: 15*60*1000, // 15 min window
-    max: 5,
+    max: 15,
     message:{
         message: "Too many requests, please try again in 15 minutes..."
     },
