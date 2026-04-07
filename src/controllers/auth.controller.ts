@@ -3,6 +3,15 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { forgotPassword, loginUser, logoutUser, refreshToken, registerUser, resendVerificationEmail, resetPassword, verifyEmail } from "../services/auth.service";
 import { clearRefreshTokenCookie, setRefreshTokenCookie } from "../utils/cookie";
 import { ApiError } from "../utils/ApiError";
+import {
+  generate2FASecret,
+  enable2FA,
+  disable2FA,
+  verify2FACode,
+} from '../services/TwoFactor.service';
+import { prisma } from "../config/prisma";
+import { signAccessToken, signRefreshToken } from "../utils/jwt";
+import { redis } from "../config/redis";
 
 export const registerController = asyncHandler( async(req: Request,res: Response) =>{
 
@@ -15,18 +24,28 @@ export const registerController = asyncHandler( async(req: Request,res: Response
 })
 
 export const loginController = asyncHandler(async(req: Request,res: Response) =>{
-    const {accessToken,refreshToken,user} = await loginUser(req.body,{
+    const result = await loginUser(req.body,{
         ip: req.ip,
         userAgent: req.headers['user-agent']
     })
 
-    // set refresh token to httpOnly cookie
-    setRefreshTokenCookie(res,refreshToken);
+    // 2FA required , as no cookie yet from early return
+    if(result.requiresTwoFactor){
+        res.json({
+            requireTwoFactor: true,
+            tempToken: result.tempToken,
+            message: "Enter 2FA code to continue..."
+        })
+        return;
+    }
+
+    // set refresh token to httpOnly cookie [normal login]
+    setRefreshTokenCookie(res,result.refreshToken!);
 
     res.json({
         message:"Login successful...",
-        accessToken,
-        user
+        accressToken: result.accessToken,
+        user: result.user
     })
 })
 
@@ -91,3 +110,65 @@ export const resetPasswordController =  asyncHandler(async (req: Request, res: R
     const result = await resetPassword(token,password);
     res.json(result)
 })
+
+
+
+
+
+export const generate2FASecretHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { qrCode, secret } = await generate2FASecret(req.user!.userId);
+  res.json({
+    message: 'Scan this QR code with Google Authenticator',
+    qrCode,
+    secret, // backup — in case QR scan fails
+  });
+});
+
+export const enable2FAHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { code } = req.body;
+  const result = await enable2FA(req.user!.userId, code);
+  res.json(result); // includes backup codes — shown ONCE
+});
+
+export const disable2FAHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { code } = req.body;
+  const result = await disable2FA(req.user!.userId, code);
+  res.json(result);
+});
+
+export const verify2FAHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { code } = req.body;
+  const userId = req.user!.userId;
+
+  await verify2FACode(userId, code);
+
+  // 2FA passed — now issue real tokens
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new ApiError(404, 'User not found');
+
+  const payload = { userId: user.id, email: user.email, role: user.role };
+  const accessToken = signAccessToken(payload);
+  const refreshToken = signRefreshToken(payload);
+
+  const refreshTokenId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await Promise.all([
+    redis.setex(`refresh:${user.id}:${refreshTokenId}`, 7 * 24 * 60 * 60, refreshToken),
+    prisma.refreshToken.create({
+      data: {
+        id: refreshTokenId,
+        token: refreshToken,
+        userId: user.id,
+        expiresAt,
+      },
+    }),
+  ]);
+
+  setRefreshTokenCookie(res, refreshToken);
+  res.json({
+    message: 'Login successful',
+    accessToken,
+    user: { id: user.id, email: user.email, role: user.role },
+  });
+});

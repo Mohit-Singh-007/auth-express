@@ -7,6 +7,8 @@ import crypto from 'crypto';
 import { ApiError } from "../utils/ApiError";
 import { JwtPayload, signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
 import { redis } from "../config/redis";
+import jwt from "jsonwebtoken"
+import { env } from "../config/env";
 
 export const registerUser = async(data: RegisterInput) =>{
     const{name,email,password} = data;
@@ -96,6 +98,33 @@ export const loginUser = async(
         if(!user.isVerified){
             throw new ApiError(401,"Email not verified...")
         }
+
+        // [new] check if 2FA is enabled
+        if(user.twoFactorEnabled){
+            const tempToken = jwt.sign(
+                {userId: user.id , purpose:"2fa"},
+                env.JWT_ACCESS_SECRET,
+                {expiresIn: '5m'}
+
+            )
+
+            // reset failed attempts as password was corrext
+              await prisma.user.update({
+            where:{id: user.id},
+            data:{
+                failedLoginAttempts: 0 , lockedUntil: null
+            }})
+
+            // early return
+            return {
+                requiresTwoFactor: true,
+                tempToken,
+                accessToken: null,
+                refreshToken: null,
+                user: null
+            }
+        }
+        
 
 
         // 6. reset failed attempt on success

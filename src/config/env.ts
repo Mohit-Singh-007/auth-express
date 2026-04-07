@@ -15,6 +15,7 @@ const envSchema = z.object({
     JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
     CLIENT_URL: z.string().url(),
+    APP_NAME: z.string().min(1)
 });
 
 const parsedEnvSchema = envSchema.safeParse(process.env);

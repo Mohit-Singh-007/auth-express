@@ -29,6 +29,7 @@ model User {
   // 2FA
   twoFactorSecret     String?   // TOTP secret (encrypted at rest)
   twoFactorEnabled    Boolean   @default(false)
+  twoFactorBackupCodes String[] @default([])
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
