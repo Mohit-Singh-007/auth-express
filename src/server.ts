@@ -6,12 +6,12 @@ import cors from "cors";
 import { env } from "./config/env";
 import cookieParser from "cookie-parser";
 import authRouter from "./routes/auth.routes";
-import { errorHandler } from "./middlewares/globalError.middleware";
+import { errorHandler } from "./middlewares/global-error.middleware";
 import { prisma } from "./config/prisma";
-import { verifyToken } from "./middlewares/verifyToken.middleware";
-import { requireRole } from "./middlewares/requireRole.middleware";
+import { verifyToken } from "./middlewares/verify-token.middleware";
+import { requireRole } from "./middlewares/require-role.middleware";
 import { redis } from "./config/redis";
-import { generalLimiter } from "./middlewares/RateLimiter.middleware";
+import { generalLimiter } from "./middlewares/rate-limiter.middleware";
 
 
 

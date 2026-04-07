@@ -1,7 +1,7 @@
 
 import { prisma } from "../config/prisma";
 import { EmailTokenType } from "../generated/prisma";
-import { LoginInput, RegisterInput } from "../schema/authSchema";
+import { LoginInput, RegisterInput } from "../schema/auth-schema";
 import bcrypt from "bcryptjs"
 import crypto from 'crypto';
 import { ApiError } from "../utils/ApiError";

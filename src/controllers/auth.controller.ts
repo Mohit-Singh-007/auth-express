@@ -8,7 +8,7 @@ import {
   enable2FA,
   disable2FA,
   verify2FACode,
-} from '../services/TwoFactor.service';
+} from '../services/two-factor.service';
 import { prisma } from "../config/prisma";
 import { signAccessToken, signRefreshToken } from "../utils/jwt";
 import { redis } from "../config/redis";

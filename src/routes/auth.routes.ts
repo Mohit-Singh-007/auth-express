@@ -1,11 +1,11 @@
 import { Router} from "express";
-import { validate } from "../middlewares/validateSchema.middleware";
-import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema, verifyEmailSchema } from "../schema/authSchema";
+import { validate } from "../middlewares/validate-schema.middleware";
+import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema, verifyEmailSchema } from "../schema/auth-schema";
 import { forgotPasswordController, loginController, logoutController, refreshTokenController, registerController, resendVerificationController, resetPasswordController, verifyEmailController } from "../controllers/auth.controller";
-import { authLimiter, passwordResetLimiter } from "../middlewares/RateLimiter.middleware";
+import { authLimiter, passwordResetLimiter } from "../middlewares/rate-limiter.middleware";
 
-import { verifyToken } from '../middlewares/verifyToken.middleware';
-import { verifyTempToken } from '../middlewares/verifyTempToken.middleware';
+import { verifyToken } from '../middlewares/verify-token.middleware';
+import { verifyTempToken } from '../middlewares/verify-temp-token.middleware';
 import {
   generate2FASecretHandler,
   enable2FAHandler,
